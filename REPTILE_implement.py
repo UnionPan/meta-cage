@@ -10,15 +10,16 @@ from CybORG import CybORG
 from CybORG.Agents import SleepAgent, EnterpriseGreenAgent, FiniteStateRedAgent
 from CybORG.Simulator.Scenarios import EnterpriseScenarioGenerator
 from CybORG.Agents.Wrappers import BaseWrapper, BlueFlatWrapper
+import matplotlib.pyplot as plt
 
 seed = 0
 innerstepsize = 0.02  # stepsize in inner SGD
 innerepochs = 1  # number of epochs of each inner SGD
 outerstepsize0 = 0.1  # stepsize of outer optimization, i.e., meta-optimization
-niterations = 30000  # number of outer updates
+niterations = 1000  # number of outer updates
 
 # CAGE simulation step
-num_steps = 500
+num_steps = 300
 
 np.random.seed(seed)
 torch.manual_seed(seed)
@@ -111,6 +112,17 @@ optimizer = optim.Adam(model.parameters(), lr=innerstepsize)
 baseline=gen_task()
 
 # Reptile training loop
+y=[]
+x=[]
+import os
+folder_path = "pictures"
+if not os.path.exists(folder_path):
+    os.makedirs(folder_path)
+
+folder_path = "models"
+if not os.path.exists(folder_path):
+    os.makedirs(folder_path)
+
 for iteration in range(niterations):
     weights_before = deepcopy(model.state_dict())
 
@@ -118,8 +130,9 @@ for iteration in range(niterations):
     env = gen_task()
 
     # Do SGD on this task
-    train_on_task(env)
-
+    rwd=train_on_task(env)
+    x.append(iteration)
+    y.append(rwd.detach().numpy().min())
     # Interpolate between current weights and trained weights from this task
     weights_after = model.state_dict()
     outerstepsize = outerstepsize0 * (1 - iteration / niterations)  # linear schedule
@@ -128,8 +141,18 @@ for iteration in range(niterations):
         for name in weights_before
     })
     print(f"Iteration {iteration + 1}/{niterations} complete.")
-    if (iteration + 1) % 10 == 0:
-        print('reward: ',test_on_task(baseline))
-        torch.save(model.state_dict(), f'model_{iteration}.pth')
+    # if (iteration + 1) % 10 == 0:
+    if iteration % 10 == 0:
+        # loss=test_on_task(baseline)
+        # print('Loss: ', loss)
+        torch.save(model.state_dict(), f'models/model_{iteration}.pth')
+        plt.plot(x, y)
+        plt.xlabel(f'Training step')
+        plt.ylabel('Loss')
+        plt.title(f'Training in step{iteration}')
+        plt.savefig(f'pictures/picture_{iteration}.png')
+        plt.clf()
+
+
 
 print("Training complete.")
