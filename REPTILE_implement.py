@@ -50,14 +50,34 @@ class BlueAgentModel(nn.Module):
         return self.network(x)
 
 def test_on_task(env):
-    obs = env.reset()
+    obs, info = env.reset()
     total_loss = 0
-    model.eval()
-    for _ in range(num_steps):
-        actions = {}
-        for agent_name in obs[0].keys():
-            last_obs = obs[0][agent_name]
-            last_mask = obs[1][agent_name]['action_mask']
+    for step in range(num_steps):
+        actions={}
+        for agent_name in obs.keys():
+            last_obs = obs[agent_name]
+            last_mask = info[agent_name]['action_mask']
+            obs_tensor = torch.tensor(last_obs, dtype=torch.float32).unsqueeze(0)
+            action_logits = model(obs_tensor)
+            for i in range(len(last_mask)):
+                if not last_mask[i]:
+                    action_logits[0][i] = 0
+            action = torch.argmax(action_logits, dim=1).item()
+            actions[agent_name] = action
+        obs, rewards, terminated_set,truncated_set, info = env.step(actions=actions)
+        for agent_name, reward in rewards.items():
+            total_loss-=reward
+    return total_loss
+
+def train_on_task(env):
+    obs, info = env.reset()
+    total_loss = 0
+
+    for step in range(num_steps):
+        actions={}
+        for agent_name in obs.keys():
+            last_obs = obs[agent_name]
+            last_mask = info[agent_name]['action_mask']
             obs_tensor = torch.tensor(last_obs, dtype=torch.float32).unsqueeze(0)
             action_logits = model(obs_tensor)
             for i in range(len(last_mask)):
@@ -66,34 +86,18 @@ def test_on_task(env):
             action = torch.argmax(action_logits, dim=1).item()
             actions[agent_name] = action
 
-        obs, reward, terminated, truncated, _ = env.step(actions=actions)
-        total_loss -= reward
-    model.train()
-    return total_loss
 
-def train_on_task(env):
-    obs = env.reset()
-    total_loss = 0
-    for _ in range(num_steps):
-        actions={}
-        for agent_name in obs[0].keys():
-            last_obs=obs[0][agent_name]
-            last_mask=obs[1][agent_name]['action_mask']
-            obs_tensor = torch.tensor(last_obs, dtype=torch.float32).unsqueeze(0)
-            action_logits = model(obs_tensor)
-            for i in range(len(last_mask)):
-                if not last_mask[i]:
-                    action_logits[0][i]=0
-            action = torch.argmax(action_logits, dim=1).item()
-            actions[agent_name]=action
+        obs, rewards, terminated_set,truncated_set, info = env.step(actions=actions)
 
-        obs, reward, terminated_set,truncated_set, _ = env.step(actions=actions)
+        losses = []
+        for agent_name, reward in rewards.items():
+            reward_tensor = torch.tensor(float(reward), requires_grad=True)
+            loss = -reward_tensor
+            losses.append(loss)
 
-        loss = -reward
-        total_loss += loss
-
+        total_loss = sum(losses)
         optimizer.zero_grad()
-        loss.backward()
+        total_loss.backward()
         optimizer.step()
     return total_loss
 
@@ -124,8 +128,8 @@ for iteration in range(niterations):
         for name in weights_before
     })
     print(f"Iteration {iteration + 1}/{niterations} complete.")
-    if (iteration + 1) % 100 == 0:
-        print('reward',test_on_task(baseline))
+    if (iteration + 1) % 10 == 0:
+        print('reward: ',test_on_task(baseline))
         torch.save(model.state_dict(), f'model_{iteration}.pth')
 
 print("Training complete.")
